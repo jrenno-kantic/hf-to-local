@@ -10,6 +10,21 @@ The main use case is reusing downloaded HF models with local runtimes without co
 
 Hugging Face stores Hub downloads under `~/.cache/huggingface/hub` by default. Model repositories appear as folders like `models--org--repo`, with `refs`, `snapshots`, and `blobs` below them. This tool reads that layout and creates links in a target directory.
 
+## Cache Location
+
+By default the tool reads the Hub cache resolved in this order:
+
+1. `HF_HUB_CACHE` if set.
+2. `$HF_HOME/hub` if `HF_HOME` is set.
+3. `~/.cache/huggingface/hub`.
+
+Override it explicitly with `--cache` on either command:
+
+```bash
+bin/hf-to-local list --cache /data/hf/hub
+bin/hf-to-local --target ~/LocalModels --cache /data/hf/hub
+```
+
 ## Build
 
 ```bash
@@ -146,6 +161,15 @@ bin/hf-to-local --target ~/LocalModels --revision 0123456789abcdef
 
 By default, the tool uses `refs/main` when available, otherwise the newest cached snapshot folder.
 
+Process every cached snapshot instead of a single one per repo:
+
+```bash
+bin/hf-to-local --target ~/LocalModels --all-snapshots
+bin/hf-to-local list --revision main --all-snapshots
+```
+
+On `list`, `--all-snapshots` shows every cached snapshot when `--revision` is set; on the create command it links all snapshots rather than the selected one.
+
 Keep only text-generation GGUF models recognized by llama.cpp:
 
 ```bash
@@ -217,6 +241,7 @@ bin/hf-to-local --version
 
 ## Notes
 
+- Small metadata files (`README.md`, `LICENSE*`, `config.json`, `generation_config.json`, and the `tokenizer*` files) are linked beside GGUF models by default. Pass `--no-include-metadata` to link only the model files.
 - LM Studio primarily consumes GGUF model files in this workflow.
 - Ollama can import a GGUF file with `FROM /path/to/file.gguf` or safetensors weights with `FROM /path/to/safetensors/directory`.
 - `--llama-cpp-only` disables the Ollama safetensors fallback and keeps only compatible primary GGUF models plus companion `mmproj-*.gguf` and `mtp-*.gguf` files.
