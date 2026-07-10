@@ -57,6 +57,7 @@ func runCreate(args []string) {
 	flags.StringVar(&opts.OllamaNameTemplate, "ollama-name-template", "{repo}-{quant}", "Ollama model name template using {repo}, {repo_slug}, {quant}, {revision}")
 	flags.BoolVar(&noIncludeMetadata, "no-include-metadata", false, "Do not include small metadata files beside GGUF links")
 	flags.BoolVar(&opts.LlamaCppOnly, "llama-cpp-only", false, "Only include GGUF text-generation model architectures recognized by llama.cpp")
+	flags.BoolVar(&opts.ResolveNames, "resolve-names", false, "Resolve org-less cached repo ids to their canonical HF id via the Hugging Face API before building target folders (requires network; falls back to the cached name when offline)")
 	flags.BoolVar(&showVersion, "version", false, "Print version and exit")
 	flags.Usage = func() {
 		fmt.Fprintf(flags.Output(), "Usage: %s --target DIR [options]\n\n", flags.Name())

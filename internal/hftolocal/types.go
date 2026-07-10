@@ -47,6 +47,7 @@ type Options struct {
 	PlanFormat         string
 	IncludeMetadata    bool
 	LlamaCppOnly       bool
+	ResolveNames       bool
 	CreateOllama       bool
 	OllamaNameTemplate string
 	Stdout             io.Writer

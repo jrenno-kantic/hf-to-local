@@ -57,12 +57,15 @@ before it moved under the `almanach` organization on the Hub). The cache folder
 keeps its original name, so `list` reports the bare id by default. Pass
 `--resolve-names` to look the canonical `org/name` up via the Hugging Face API;
 resolved names are memoized on disk, and the bare id is kept as-is when offline
-or when the lookup is ambiguous.
+or when the lookup is ambiguous. The same flag is available when creating links,
+where the canonical id also determines the `namespace/name` of the generated
+target folders.
 
 Preview all cached model links:
 
 ```bash
 bin/hf-to-local --target ~/LocalModels --dry-run
+bin/hf-to-local --target ~/LocalModels --dry-run --resolve-names
 bin/hf-to-local --target ~/LocalModels --runtime ollama --plan json
 ```
 
@@ -202,8 +205,8 @@ This writes platform archives and `checksums.txt` under `dist/`.
 Tagged releases are handled by GoReleaser in GitHub Actions:
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.2.0
+git push origin v0.2.0
 ```
 
 Print the embedded version:
@@ -217,6 +220,6 @@ bin/hf-to-local --version
 - LM Studio primarily consumes GGUF model files in this workflow.
 - Ollama can import a GGUF file with `FROM /path/to/file.gguf` or safetensors weights with `FROM /path/to/safetensors/directory`.
 - `--llama-cpp-only` disables the Ollama safetensors fallback and keeps only compatible primary GGUF models plus companion `mmproj-*.gguf` and `mtp-*.gguf` files.
-- `--resolve-names` (list only) is the sole feature that reaches the network; every other operation is fully offline. It only queries the Hub for org-less cache folders, follows the API redirect to the canonical `org/name`, and caches the mapping under the user cache dir (`repo-names.json`).
+- `--resolve-names` (available on both `list` and the create command) is the sole feature that reaches the network; every other operation is fully offline. It only queries the Hub for org-less cache folders, follows the API redirect to the canonical `org/name`, and caches the mapping under the user cache dir (`repo-names.json`). On the create command it also drives the `namespace/name` layout of the generated target folders.
 - Hardlinks cannot cross filesystems. On Windows, symlink creation may require Developer Mode or elevated privileges.
 - The tool does not download models. Use Hugging Face tooling first, then run this tool against the populated cache.

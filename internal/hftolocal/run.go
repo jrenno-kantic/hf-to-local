@@ -43,6 +43,10 @@ func Run(opts Options) (Summary, error) {
 		return Summary{}, err
 	}
 
+	if opts.ResolveNames {
+		resolveRepoNames(repos, defaultNameResolver, defaultNameCachePath(), resolveTimeout)
+	}
+
 	summary := Summary{ReposSeen: len(repos)}
 	var ollamaCreates []OllamaCreate
 	ggufClassifier := newGGUFClassifier()
