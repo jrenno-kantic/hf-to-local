@@ -1,0 +1,23 @@
+# IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+
+# Claude per-project state
+.claude/
+CLAUDE.md
+AGENT.md
+
+# Project-specific
+.cache/
+bin/
+build/
+dist/
+
+# Misc
+*.log
+
+# Keep .gitkeep files
+!/**/.gitkeep
