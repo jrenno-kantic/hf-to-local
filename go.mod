@@ -1,3 +1,3 @@
-module github.com/jrenno/hf-to-local
+module github.com/jrenno-kantic/hf-to-local
 
-go 1.26
+go 1.27

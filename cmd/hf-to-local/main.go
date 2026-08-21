@@ -1,14 +1,19 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"text/tabwriter"
 
-	"github.com/jrenno/hf-to-local/internal/hftolocal"
+	"github.com/jrenno-kantic/hf-to-local/internal/hftolocal"
 )
 
 var version = "dev"
@@ -27,21 +32,41 @@ func (r *repoFlags) Set(value string) error {
 	return nil
 }
 
+// Exit codes. 130 follows the shell convention for SIGINT so scripts can tell an
+// interrupted run apart from a genuine failure.
+const (
+	exitOK          = 0
+	exitError       = 1
+	exitUsage       = 2
+	exitInterrupted = 130
+)
+
 func main() {
-	if len(os.Args) > 1 && os.Args[1] == "list" {
-		runList(os.Args[2:])
-		return
-	}
-	runCreate(os.Args[1:])
+	hftolocal.UserAgent = "hf-to-local/" + version
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	os.Exit(run(ctx, os.Args[1:], os.Stdout, os.Stderr))
 }
 
-func runCreate(args []string) {
+// run holds the whole CLI so tests can drive it with explicit arguments and
+// captured output instead of process globals.
+func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	if len(args) > 0 && args[0] == "list" {
+		return runList(ctx, args[1:], stdout, stderr)
+	}
+	return runCreate(ctx, args, stdout, stderr)
+}
+
+func runCreate(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	var repos repoFlags
 	var opts hftolocal.Options
 	var noIncludeMetadata bool
 	var showVersion bool
 
-	flags := flag.NewFlagSet("hf-to-local", flag.ExitOnError)
+	flags := flag.NewFlagSet("hf-to-local", flag.ContinueOnError)
+	flags.SetOutput(stderr)
 	flags.StringVar(&opts.CacheDir, "cache", hftolocal.DefaultHFCache(), "Hugging Face Hub cache directory")
 	flags.StringVar(&opts.TargetDir, "target", "", "Base output directory for linked model folders")
 	flags.StringVar(&opts.Runtime, "runtime", "all", "Output layout to create: all, lmstudio, ollama, mirror")
@@ -57,6 +82,7 @@ func runCreate(args []string) {
 	flags.StringVar(&opts.OllamaNameTemplate, "ollama-name-template", "{repo}-{quant}", "Ollama model name template using {repo}, {repo_slug}, {quant}, {revision}")
 	flags.BoolVar(&noIncludeMetadata, "no-include-metadata", false, "Do not include small metadata files beside GGUF links")
 	flags.BoolVar(&opts.LlamaCppOnly, "llama-cpp-only", false, "Only include GGUF text-generation model architectures recognized by llama.cpp")
+	flags.BoolVar(&opts.Verbose, "verbose", false, "Print per-repo progress while running")
 	flags.BoolVar(&opts.ResolveNames, "resolve-names", false, "Resolve org-less cached repo ids to their canonical HF id via the Hugging Face API before building target folders (requires network; falls back to the cached name when offline)")
 	flags.BoolVar(&showVersion, "version", false, "Print version and exit")
 	flags.Usage = func() {
@@ -68,34 +94,51 @@ func runCreate(args []string) {
 	}
 
 	if err := flags.Parse(args); err != nil {
-		os.Exit(2)
+		if errors.Is(err, flag.ErrHelp) {
+			return exitOK
+		}
+		return exitUsage
 	}
 	if showVersion {
-		fmt.Println(version)
-		return
+		fmt.Fprintln(stdout, version)
+		return exitOK
 	}
 
 	opts.Repos = repos
 	opts.IncludeMetadata = !noIncludeMetadata
-	opts.Stdout = os.Stdout
+	opts.Stdout = stdout
+	opts.Stderr = stderr
 
-	summary, err := hftolocal.Run(opts)
+	summary, err := hftolocal.Run(ctx, opts)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		os.Exit(1)
+		// An interrupted run still reports what it completed, so the user knows
+		// what state the target directory is in.
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			fmt.Fprintln(stderr, "interrupted: stopping after partial work")
+			printSummary(stdout, summary)
+			return exitInterrupted
+		}
+		fmt.Fprintf(stderr, "error: %v\n", err)
+		return exitError
 	}
 
 	if opts.PlanFormat == hftolocal.PlanJSON {
-		encoder := json.NewEncoder(os.Stdout)
+		encoder := json.NewEncoder(stdout)
 		encoder.SetIndent("", "  ")
 		if err := encoder.Encode(summary); err != nil {
-			fmt.Fprintf(os.Stderr, "error: write json plan: %v\n", err)
-			os.Exit(1)
+			fmt.Fprintf(stderr, "error: write json plan: %v\n", err)
+			return exitError
 		}
-		return
+		return exitOK
 	}
 
-	fmt.Printf(
+	printSummary(stdout, summary)
+	return exitOK
+}
+
+func printSummary(stdout io.Writer, summary hftolocal.Summary) {
+	fmt.Fprintf(
+		stdout,
 		"done: %d repo(s), %d snapshot(s), %d link(s), %d generated file(s), %d Ollama model definition(s), %d Ollama create(s), %d skipped, %s referenced, %d broken source(s)\n",
 		summary.ReposSeen,
 		summary.SnapshotsSeen,
@@ -109,12 +152,14 @@ func runCreate(args []string) {
 	)
 }
 
-func runList(args []string) {
+func runList(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	var repos repoFlags
 	var opts hftolocal.ListOptions
 	var jsonOutput bool
+	var showVersion bool
 
-	flags := flag.NewFlagSet("hf-to-local list", flag.ExitOnError)
+	flags := flag.NewFlagSet("hf-to-local list", flag.ContinueOnError)
+	flags.SetOutput(stderr)
 	flags.StringVar(&opts.CacheDir, "cache", hftolocal.DefaultHFCache(), "Hugging Face Hub cache directory")
 	flags.Var(&repos, "repo", "HF repo id to include, e.g. org/model. Can be passed multiple times")
 	flags.StringVar(&opts.Revision, "revision", "", "HF ref or snapshot commit to inspect")
@@ -122,6 +167,7 @@ func runList(args []string) {
 	flags.BoolVar(&opts.LlamaCppOnly, "llama-cpp-only", false, "Only show GGUF text-generation model architectures recognized by llama.cpp")
 	flags.BoolVar(&opts.ResolveNames, "resolve-names", false, "Resolve org-less cached repo ids to their canonical HF id via the Hugging Face API (requires network; falls back to the cached name when offline)")
 	flags.BoolVar(&jsonOutput, "json", false, "Print JSON inventory")
+	flags.BoolVar(&showVersion, "version", false, "Print version and exit")
 	flags.Usage = func() {
 		fmt.Fprintf(flags.Output(), "Usage: %s [options]\n\n", flags.Name())
 		fmt.Fprintln(flags.Output(), "List Hugging Face cache model snapshots and local files.")
@@ -129,30 +175,42 @@ func runList(args []string) {
 		flags.PrintDefaults()
 	}
 	if err := flags.Parse(args); err != nil {
-		os.Exit(2)
+		if errors.Is(err, flag.ErrHelp) {
+			return exitOK
+		}
+		return exitUsage
+	}
+	if showVersion {
+		fmt.Fprintln(stdout, version)
+		return exitOK
 	}
 
 	opts.Repos = repos
-	inventory, err := hftolocal.List(opts)
+	inventory, err := hftolocal.List(ctx, opts)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		os.Exit(1)
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			fmt.Fprintln(stderr, "interrupted")
+			return exitInterrupted
+		}
+		fmt.Fprintf(stderr, "error: %v\n", err)
+		return exitError
 	}
 
 	if jsonOutput {
-		encoder := json.NewEncoder(os.Stdout)
+		encoder := json.NewEncoder(stdout)
 		encoder.SetIndent("", "  ")
 		if err := encoder.Encode(inventory); err != nil {
-			fmt.Fprintf(os.Stderr, "error: write json inventory: %v\n", err)
-			os.Exit(1)
+			fmt.Fprintf(stderr, "error: write json inventory: %v\n", err)
+			return exitError
 		}
-		return
+		return exitOK
 	}
-	printInventory(inventory)
+	printInventory(stdout, inventory)
+	return exitOK
 }
 
-func printInventory(inventory hftolocal.Inventory) {
-	writer := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+func printInventory(stdout io.Writer, inventory hftolocal.Inventory) {
+	writer := tabwriter.NewWriter(stdout, 0, 4, 2, ' ', 0)
 	fmt.Fprintf(writer, "REPO\tREVISION\tGGUF\tSAFETENSORS\tMETADATA\tSIZE\tBROKEN\n")
 	for _, repo := range inventory.Repos {
 		for _, snapshot := range repo.Snapshots {

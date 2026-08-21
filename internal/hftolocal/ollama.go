@@ -1,6 +1,7 @@
 package hftolocal
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -8,9 +9,12 @@ import (
 	"strings"
 )
 
-func createOllama(snapshot Snapshot, opts Options, summary *Summary, classifier *ggufClassifier) ([]OllamaCreate, error) {
+func createOllama(ctx context.Context, snapshot Snapshot, opts Options, summary *Summary, classifier *ggufClassifier) ([]OllamaCreate, error) {
 	var sources []string
 	if err := walkFiles(snapshot.Path, func(source string) error {
+		if err := checkCanceled(ctx); err != nil {
+			return err
+		}
 		sources = append(sources, source)
 		return nil
 	}); err != nil {
@@ -47,9 +51,9 @@ func createOllama(snapshot Snapshot, opts Options, summary *Summary, classifier 
 				return nil, err
 			}
 		}
-		if ok, err := applyWrite(filepath.Join(modelDir, "Modelfile"), "FROM ./model.gguf\n", opts, summary); err != nil {
+		if _, present, err := applyWrite(filepath.Join(modelDir, "Modelfile"), "FROM ./model.gguf\n", opts, summary); err != nil {
 			return nil, err
-		} else if ok {
+		} else if present {
 			summary.OllamaModels++
 			creates = append(creates, OllamaCreate{ModelName: modelName, ModelDir: modelDir})
 		}
@@ -67,9 +71,9 @@ func createOllama(snapshot Snapshot, opts Options, summary *Summary, classifier 
 			}
 		}
 		modelName := modelNameFromTemplate(snapshot.Repo.RepoID, revisionSlug, snapshot.RevisionLabel, opts.OllamaNameTemplate)
-		if ok, err := applyWrite(filepath.Join(modelDir, "Modelfile"), "FROM .\n", opts, summary); err != nil {
+		if _, present, err := applyWrite(filepath.Join(modelDir, "Modelfile"), "FROM .\n", opts, summary); err != nil {
 			return nil, err
-		} else if ok {
+		} else if present {
 			summary.OllamaModels++
 			creates = append(creates, OllamaCreate{ModelName: modelName, ModelDir: modelDir})
 		}
@@ -88,9 +92,9 @@ func writeOllamaScript(targetDir string, creates []OllamaCreate, opts Options, s
 	}
 	content := "#!/usr/bin/env bash\nset -euo pipefail\n\n" + strings.Join(commands, "\n") + "\n"
 	script := filepath.Join(targetDir, RuntimeOllama, "create-all.sh")
-	if ok, err := applyWrite(script, content, opts, summary); err != nil {
+	if created, _, err := applyWrite(script, content, opts, summary); err != nil {
 		return err
-	} else if ok && !opts.DryRun {
+	} else if created && !opts.DryRun {
 		if err := os.Chmod(script, 0o755); err != nil {
 			return err
 		}
@@ -113,8 +117,8 @@ func modelNameFromTemplate(repoID, quant, revision, template string) string {
 	return strings.ToLower(safeSegment(replacer.Replace(template)))
 }
 
-func runOllamaCreate(create OllamaCreate) error {
-	command := exec.Command("ollama", "create", create.ModelName, "-f", "Modelfile")
+func runOllamaCreate(ctx context.Context, create OllamaCreate) error {
+	command := exec.CommandContext(ctx, "ollama", "create", create.ModelName, "-f", "Modelfile")
 	command.Dir = create.ModelDir
 	output, err := command.CombinedOutput()
 	if err != nil {

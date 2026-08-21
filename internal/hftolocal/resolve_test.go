@@ -26,7 +26,7 @@ func TestResolveRepoNames(t *testing.T) {
 		{RepoID: "unknown-model"},
 	}
 	cachePath := filepath.Join(t.TempDir(), "names.json")
-	resolveRepoNames(repos, resolve, cachePath, time.Second)
+	resolveRepoNames(context.Background(), repos, resolve, cachePath, time.Second, resolveBudget)
 
 	if repos[0].RepoID != "almanach/camembert-base" {
 		t.Fatalf("bare name not resolved: got %q", repos[0].RepoID)
@@ -47,7 +47,7 @@ func TestResolveRepoNames(t *testing.T) {
 		delete(calls, k)
 	}
 	repos2 := []CachedRepo{{RepoID: "camembert-base"}, {RepoID: "unknown-model"}}
-	resolveRepoNames(repos2, resolve, cachePath, time.Second)
+	resolveRepoNames(context.Background(), repos2, resolve, cachePath, time.Second, resolveBudget)
 
 	if repos2[0].RepoID != "almanach/camembert-base" {
 		t.Fatalf("cached name not applied: got %q", repos2[0].RepoID)
@@ -62,7 +62,7 @@ func TestResolveRepoNames(t *testing.T) {
 
 func TestResolveRepoNamesNilResolver(t *testing.T) {
 	repos := []CachedRepo{{RepoID: "camembert-base"}}
-	resolveRepoNames(repos, nil, "", time.Second)
+	resolveRepoNames(context.Background(), repos, nil, "", time.Second, resolveBudget)
 	if repos[0].RepoID != "camembert-base" {
 		t.Fatalf("nil resolver must leave repos untouched: got %q", repos[0].RepoID)
 	}

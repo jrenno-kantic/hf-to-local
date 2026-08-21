@@ -1,6 +1,7 @@
 package hftolocal
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -55,7 +56,10 @@ type BrokenFile struct {
 	Error string `json:"error"`
 }
 
-func List(opts ListOptions) (Inventory, error) {
+func List(ctx context.Context, opts ListOptions) (Inventory, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if opts.CacheDir == "" {
 		opts.CacheDir = DefaultHFCache()
 	}
@@ -65,18 +69,24 @@ func List(opts ListOptions) (Inventory, error) {
 	}
 	opts.CacheDir = cacheDir
 
-	repos, err := discoverRepos(opts.CacheDir, opts.Repos)
+	repos, err := discoverRepos(opts.CacheDir)
 	if err != nil {
 		return Inventory{}, err
 	}
-
 	if opts.ResolveNames {
-		resolveRepoNames(repos, defaultNameResolver, defaultNameCachePath(), resolveTimeout)
+		resolveRepoNames(ctx, repos, defaultNameResolver, defaultNameCachePath(), resolveTimeout, resolveBudget)
+	}
+	repos, err = filterRepos(repos, opts.Repos, opts.ResolveNames)
+	if err != nil {
+		return Inventory{}, err
 	}
 
 	inventory := Inventory{CacheDir: opts.CacheDir}
 	ggufClassifier := newGGUFClassifier()
 	for _, repo := range repos {
+		if err := checkCanceled(ctx); err != nil {
+			return inventory, err
+		}
 		repoInventory, err := inspectRepo(repo, opts, ggufClassifier)
 		if err != nil {
 			return inventory, err

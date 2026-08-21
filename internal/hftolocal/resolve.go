@@ -22,6 +22,21 @@ const hfModelsAPI = "https://huggingface.co/api/models/"
 // network never stalls the list command.
 const resolveTimeout = 5 * time.Second
 
+// resolveBudget bounds the whole resolution pass. Without it a cache holding
+// many legacy org-less repos multiplies resolveTimeout by the repo count.
+const resolveBudget = 30 * time.Second
+
+// resolveAttempts is the total number of tries per lookup, including the first.
+const resolveAttempts = 2
+
+// resolveBackoff is the pause before a retry of a transient failure.
+var resolveBackoff = 250 * time.Millisecond
+
+// UserAgent identifies the client to the Hugging Face API. Anonymous traffic is
+// rate limited more aggressively when it is unattributed; main overrides this
+// with the build version.
+var UserAgent = "hf-to-local"
+
 var sharedHTTPClient = &http.Client{Timeout: resolveTimeout}
 
 // nameResolver maps a bare repo id (no "/") to its canonical "org/name".
@@ -33,40 +48,80 @@ func defaultNameResolver(ctx context.Context, bareID string) (string, error) {
 }
 
 func httpResolveRepoID(ctx context.Context, client *http.Client, baseURL, bareID string) (string, error) {
+	var lastErr error
+	for attempt := 0; attempt < resolveAttempts; attempt++ {
+		if attempt > 0 {
+			timer := time.NewTimer(resolveBackoff)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return "", ctx.Err()
+			case <-timer.C:
+			}
+		}
+		id, retryable, err := httpResolveOnce(ctx, client, baseURL, bareID)
+		if err == nil {
+			return id, nil
+		}
+		lastErr = err
+		if !retryable {
+			break
+		}
+	}
+	return "", lastErr
+}
+
+// httpResolveOnce performs a single lookup. retryable distinguishes transient
+// server-side conditions from a definitive answer such as 404, which must not
+// be retried.
+func httpResolveOnce(ctx context.Context, client *http.Client, baseURL, bareID string) (id string, retryable bool, err error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+url.PathEscape(bareID), nil)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
+	req.Header.Set("User-Agent", UserAgent)
+	req.Header.Set("Accept", "application/json")
+
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", err
+		if ctx.Err() != nil {
+			return "", false, ctx.Err()
+		}
+		return "", true, err
 	}
 	defer resp.Body.Close()
+
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("hf api status %d for %q", resp.StatusCode, bareID)
+		transient := resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500
+		return "", transient, fmt.Errorf("hf api status %d for %q", resp.StatusCode, bareID)
 	}
+
 	var payload struct {
 		ID string `json:"id"`
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&payload); err != nil {
-		return "", err
+		return "", false, err
 	}
 	if payload.ID == "" {
-		return "", fmt.Errorf("hf api returned empty id for %q", bareID)
+		return "", false, fmt.Errorf("hf api returned empty id for %q", bareID)
 	}
-	return payload.ID, nil
+	return payload.ID, false, nil
 }
 
 // resolveRepoNames rewrites org-less repo ids to their canonical "org/name"
 // form. Repos that already carry an org, and lookups that fail (offline,
 // ambiguous, or genuinely org-less repos), keep their original id. Successful
 // resolutions are memoized on disk so repeated runs stay offline-friendly.
-func resolveRepoNames(repos []CachedRepo, resolve nameResolver, cachePath string, timeout time.Duration) {
+func resolveRepoNames(ctx context.Context, repos []CachedRepo, resolve nameResolver, cachePath string, timeout, budget time.Duration) {
 	if resolve == nil {
 		return
 	}
 	names := loadNameCache(cachePath)
 	changed := false
+
+	budgetCtx, cancelBudget := context.WithTimeout(ctx, budget)
+	defer cancelBudget()
+
 	for i := range repos {
 		id := repos[i].RepoID
 		if strings.Contains(id, "/") {
@@ -78,8 +133,11 @@ func resolveRepoNames(repos []CachedRepo, resolve nameResolver, cachePath string
 			}
 			continue
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), timeout)
-		canonical, err := resolve(ctx, id)
+		if budgetCtx.Err() != nil {
+			break // out of time; keep remaining bare names and retry on a later run
+		}
+		callCtx, cancel := context.WithTimeout(budgetCtx, timeout)
+		canonical, err := resolve(callCtx, id)
 		cancel()
 		if err != nil || canonical == "" {
 			continue // keep bare name; retry on a later run
@@ -121,11 +179,14 @@ func loadNameCache(path string) map[string]string {
 	return names
 }
 
+// saveNameCache writes the lookup cache atomically. A torn write from a crash or
+// from two concurrent runs would otherwise leave unparseable JSON behind.
 func saveNameCache(path string, names map[string]string) {
 	if path == "" {
 		return
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return
 	}
 	data, err := json.MarshalIndent(struct {
@@ -134,5 +195,26 @@ func saveNameCache(path string, names map[string]string) {
 	if err != nil {
 		return
 	}
-	_ = os.WriteFile(path, data, 0o644)
+
+	temp, err := os.CreateTemp(dir, ".repo-names-*.json")
+	if err != nil {
+		return
+	}
+	tempName := temp.Name()
+	if _, err := temp.Write(data); err != nil {
+		temp.Close()
+		os.Remove(tempName)
+		return
+	}
+	if err := temp.Close(); err != nil {
+		os.Remove(tempName)
+		return
+	}
+	if err := os.Chmod(tempName, 0o644); err != nil {
+		os.Remove(tempName)
+		return
+	}
+	if err := os.Rename(tempName, path); err != nil {
+		os.Remove(tempName)
+	}
 }

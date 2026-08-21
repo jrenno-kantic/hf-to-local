@@ -2,6 +2,7 @@ package hftolocal
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"os"
 	"path/filepath"
@@ -10,8 +11,20 @@ import (
 	"testing"
 )
 
+// requireSymlinks skips a test when the platform will not let this process
+// create symlinks. Windows needs Developer Mode or elevation, and every fixture
+// here models the HF cache's snapshot->blob symlink layout.
+func requireSymlinks(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.Symlink(filepath.Join(dir, "target"), filepath.Join(dir, "link")); err != nil {
+		t.Skipf("symlinks unavailable on %s: %v", runtime.GOOS, err)
+	}
+}
+
 func makeHFCache(t *testing.T, repoID string) string {
 	t.Helper()
+	requireSymlinks(t)
 	cache := filepath.Join(t.TempDir(), "cache")
 	repoCache := filepath.Join(cache, RepoIDToCacheName(repoID))
 	commit := "abc123"
@@ -120,7 +133,7 @@ func TestLMStudioLinksGGUFAndMetadata(t *testing.T) {
 	cache := makeHFCache(t, "org/Test-GGUF")
 	target := filepath.Join(t.TempDir(), "target")
 
-	summary, err := Run(Options{
+	summary, err := Run(context.Background(), Options{
 		CacheDir:        cache,
 		TargetDir:       target,
 		Runtime:         RuntimeLMStudio,
@@ -143,7 +156,7 @@ func TestOllamaCreatesModelfileAndScript(t *testing.T) {
 	cache := makeHFCache(t, "org/Test-GGUF")
 	target := filepath.Join(t.TempDir(), "target")
 
-	summary, err := Run(Options{
+	summary, err := Run(context.Background(), Options{
 		CacheDir:        cache,
 		TargetDir:       target,
 		Runtime:         RuntimeOllama,
@@ -186,7 +199,7 @@ func TestLlamaCppOnlyFiltersNonGenerationGGUF(t *testing.T) {
 	addGGUFFile(t, cache, repoID, "mtp-draft.gguf", "llama", "model")
 	target := filepath.Join(t.TempDir(), "target")
 
-	summary, err := Run(Options{
+	summary, err := Run(context.Background(), Options{
 		CacheDir:        cache,
 		TargetDir:       target,
 		Runtime:         RuntimeLMStudio,
@@ -219,7 +232,7 @@ func TestLlamaCppOnlyOllamaLinksCompanionGGUFsBesidePrimaryModel(t *testing.T) {
 	addGGUFFile(t, cache, repoID, "mtp-draft.gguf", "llama", "model")
 	target := filepath.Join(t.TempDir(), "target")
 
-	summary, err := Run(Options{
+	summary, err := Run(context.Background(), Options{
 		CacheDir:        cache,
 		TargetDir:       target,
 		Runtime:         RuntimeOllama,
@@ -253,7 +266,7 @@ func TestLlamaCppOnlySkipsBertSnapshotAndOllamaSafetensorsFallback(t *testing.T)
 	addSafetensorsAndBrokenLink(t, cache, repoID)
 	target := filepath.Join(t.TempDir(), "target")
 
-	summary, err := Run(Options{
+	summary, err := Run(context.Background(), Options{
 		CacheDir:        cache,
 		TargetDir:       target,
 		Runtime:         RuntimeOllama,
@@ -278,7 +291,7 @@ func TestDryRunDoesNotCreateTarget(t *testing.T) {
 	target := filepath.Join(t.TempDir(), "target")
 	var out bytes.Buffer
 
-	_, err := Run(Options{
+	_, err := Run(context.Background(), Options{
 		CacheDir:        cache,
 		TargetDir:       target,
 		Runtime:         RuntimeOllama,
@@ -302,7 +315,7 @@ func TestJSONPlanRecordsOperationsAndDoesNotCreateTarget(t *testing.T) {
 	cache := makeHFCache(t, "org/Test-GGUF")
 	target := filepath.Join(t.TempDir(), "target")
 
-	summary, err := Run(Options{
+	summary, err := Run(context.Background(), Options{
 		CacheDir:        cache,
 		TargetDir:       target,
 		Runtime:         RuntimeOllama,
@@ -331,7 +344,7 @@ func TestCopyModeCopiesResolvedFile(t *testing.T) {
 	cache := makeHFCache(t, "org/Test-GGUF")
 	target := filepath.Join(t.TempDir(), "target")
 
-	_, err := Run(Options{
+	_, err := Run(context.Background(), Options{
 		CacheDir:        cache,
 		TargetDir:       target,
 		Runtime:         RuntimeLMStudio,
@@ -366,7 +379,7 @@ func TestHardlinkMode(t *testing.T) {
 	cache := makeHFCache(t, "org/Test-GGUF")
 	target := filepath.Join(t.TempDir(), "target")
 
-	_, err := Run(Options{
+	_, err := Run(context.Background(), Options{
 		CacheDir:        cache,
 		TargetDir:       target,
 		Runtime:         RuntimeLMStudio,
@@ -398,7 +411,7 @@ func TestConflictPolicyFail(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := Run(Options{
+	_, err := Run(context.Background(), Options{
 		CacheDir:        cache,
 		TargetDir:       target,
 		Runtime:         RuntimeLMStudio,
@@ -422,7 +435,7 @@ func TestConflictPolicyReplace(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := Run(Options{
+	_, err := Run(context.Background(), Options{
 		CacheDir:        cache,
 		TargetDir:       target,
 		Runtime:         RuntimeLMStudio,
@@ -441,7 +454,7 @@ func TestListInventoryReportsFilesAndBrokenLinks(t *testing.T) {
 	cache := makeHFCache(t, repoID)
 	addSafetensorsAndBrokenLink(t, cache, repoID)
 
-	inventory, err := List(ListOptions{CacheDir: cache})
+	inventory, err := List(context.Background(), ListOptions{CacheDir: cache})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -470,7 +483,7 @@ func TestListLlamaCppOnlyReportsOnlyCompatibleGGUF(t *testing.T) {
 	addGGUFFile(t, cache, repoID, "bert.Q8_0.gguf", "bert", "model")
 	addGGUFFile(t, cache, repoID, "mmproj-vision.gguf", "clip", "model")
 
-	inventory, err := List(ListOptions{CacheDir: cache, LlamaCppOnly: true})
+	inventory, err := List(context.Background(), ListOptions{CacheDir: cache, LlamaCppOnly: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -494,7 +507,7 @@ func TestOllamaNameTemplate(t *testing.T) {
 	cache := makeHFCache(t, "org/Test-GGUF")
 	target := filepath.Join(t.TempDir(), "target")
 
-	_, err := Run(Options{
+	_, err := Run(context.Background(), Options{
 		CacheDir:           cache,
 		TargetDir:          target,
 		Runtime:            RuntimeOllama,
@@ -516,7 +529,7 @@ func TestOllamaNameTemplate(t *testing.T) {
 
 func TestMissingRepoReturnsUsefulError(t *testing.T) {
 	cache := makeHFCache(t, "org/Test-GGUF")
-	_, err := Run(Options{
+	_, err := Run(context.Background(), Options{
 		CacheDir:        cache,
 		TargetDir:       filepath.Join(t.TempDir(), "target"),
 		Runtime:         RuntimeLMStudio,

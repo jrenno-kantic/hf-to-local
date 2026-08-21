@@ -50,7 +50,9 @@ type Options struct {
 	ResolveNames       bool
 	CreateOllama       bool
 	OllamaNameTemplate string
+	Verbose            bool
 	Stdout             io.Writer
+	Stderr             io.Writer
 }
 
 type Summary struct {

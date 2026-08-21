@@ -1,6 +1,8 @@
 package hftolocal
 
 import (
+	"context"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -67,6 +69,10 @@ func repoParts(repoID string) (string, string) {
 	return parts[0], parts[1]
 }
 
+// safeSegment reduces value to a single path element that is safe to join onto
+// a destination root. Dots are allowed so quant and revision labels keep their
+// natural form, which means "." and ".." survive the character filter; both are
+// rejected explicitly so a segment can never walk up out of the target.
 func safeSegment(value string) string {
 	var builder strings.Builder
 	for _, r := range value {
@@ -77,10 +83,56 @@ func safeSegment(value string) string {
 		}
 	}
 	cleaned := strings.Trim(builder.String(), "-")
-	if cleaned == "" {
+	if cleaned == "" || strings.Trim(cleaned, ".") == "" {
 		return "model"
 	}
 	return cleaned
+}
+
+// safeRelPath sanitizes each element of a possibly multi-segment repo name.
+// Cache folder names encode "/" as "--", so a crafted folder can decode to a
+// repo id containing path separators; sanitizing per element keeps legitimate
+// nesting while making traversal impossible.
+func safeRelPath(value string) string {
+	parts := strings.Split(value, "/")
+	cleaned := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part == "" {
+			continue
+		}
+		cleaned = append(cleaned, safeSegment(part))
+	}
+	if len(cleaned) == 0 {
+		return "model"
+	}
+	return filepath.Join(cleaned...)
+}
+
+// checkCanceled reports ctx cancellation without blocking, for use at loop and
+// walk boundaries so a long run stops promptly on SIGINT.
+func checkCanceled(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+		return nil
+	}
+}
+
+// warn writes a diagnostic to the run's stderr stream.
+func warn(opts Options, format string, args ...any) {
+	if opts.Stderr == nil {
+		return
+	}
+	fmt.Fprintf(opts.Stderr, "warning: "+format+"\n", args...)
+}
+
+// progress writes a per-repo progress line when --verbose is set.
+func progress(opts Options, format string, args ...any) {
+	if !opts.Verbose || opts.Stderr == nil {
+		return
+	}
+	fmt.Fprintf(opts.Stderr, format+"\n", args...)
 }
 
 func quantName(ggufPath string) string {

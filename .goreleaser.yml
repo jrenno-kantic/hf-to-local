@@ -40,6 +40,49 @@ archives:
 checksum:
   name_template: checksums.txt
 
+# One SBOM per archive, so consumers can see exactly what shipped.
+sboms:
+  - id: archives
+    artifacts: archive
+
+# Sign the checksum file rather than each archive: checksums.txt already covers
+# every artifact, so one signature verifies the whole release. Keyless signing
+# uses the workflow's OIDC identity, which is why release.yml needs id-token.
+signs:
+  - cmd: cosign
+    signature: "${artifact}.sig"
+    certificate: "${artifact}.pem"
+    args:
+      - sign-blob
+      - "--output-signature=${signature}"
+      - "--output-certificate=${certificate}"
+      - "${artifact}"
+      - "--yes"
+    artifacts: checksum
+    output: true
+
+# Homebrew tap. Left disabled because publishing needs two things that do not
+# exist yet; enabling it before then makes `git push --tags` fail the release:
+#
+#   1. A tap repository named jrenno-kantic/homebrew-tap.
+#   2. A HOMEBREW_TAP_GITHUB_TOKEN secret with write access to it, exported in
+#      .github/workflows/release.yml (the default GITHUB_TOKEN cannot push to
+#      another repository).
+#
+# Once both exist, uncomment this block and add the secret to the release job.
+#
+# brews:
+#   - name: hf-to-local
+#     repository:
+#       owner: jrenno-kantic
+#       name: homebrew-tap
+#       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+#     homepage: "https://github.com/jrenno-kantic/hf_to_local"
+#     description: "Create local model folders that link into the Hugging Face Hub cache"
+#     license: "MIT"
+#     test: |
+#       system "#{bin}/hf-to-local", "--version"
+
 snapshot:
   version_template: "{{ incpatch .Version }}-next"
 

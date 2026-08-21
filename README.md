@@ -10,6 +10,52 @@ The main use case is reusing downloaded HF models with local runtimes without co
 
 Hugging Face stores Hub downloads under `~/.cache/huggingface/hub` by default. Model repositories appear as folders like `models--org--repo`, with `refs`, `snapshots`, and `blobs` below them. This tool reads that layout and creates links in a target directory.
 
+## Install
+
+Download an archive for your platform from the
+[releases page](https://github.com/jrenno-kantic/hf_to_local/releases), then
+extract and place the binary on your `PATH`:
+
+```bash
+VERSION=0.2.0
+OS=$(uname -s | tr '[:upper:]' '[:lower:]')   # darwin or linux
+ARCH=$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')
+
+curl -sSfL -o hf-to-local.tar.gz \
+  "https://github.com/jrenno-kantic/hf_to_local/releases/download/v$VERSION/hf-to-local_${VERSION}_${OS}_${ARCH}.tar.gz"
+tar -xzf hf-to-local.tar.gz
+sudo install hf-to-local /usr/local/bin/
+```
+
+Windows archives are `.zip` rather than `.tar.gz`.
+
+### Verifying a download
+
+Every release publishes `checksums.txt`, a cosign signature over it, and an SBOM
+per archive. Check the archive against the checksum file:
+
+```bash
+curl -sSfLO "https://github.com/jrenno-kantic/hf_to_local/releases/download/v$VERSION/checksums.txt"
+shasum -a 256 -c checksums.txt --ignore-missing
+```
+
+The checksum file itself is signed with [cosign](https://docs.sigstore.dev/) in
+keyless mode, so the signature is tied to the release workflow's identity rather
+than to a long-lived key:
+
+```bash
+curl -sSfLO "https://github.com/jrenno-kantic/hf_to_local/releases/download/v$VERSION/checksums.txt.sig"
+curl -sSfLO "https://github.com/jrenno-kantic/hf_to_local/releases/download/v$VERSION/checksums.txt.pem"
+
+cosign verify-blob checksums.txt \
+  --signature checksums.txt.sig \
+  --certificate checksums.txt.pem \
+  --certificate-identity-regexp '^https://github.com/jrenno-kantic/hf_to_local/\.github/workflows/release\.yml@refs/tags/v' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
+Building from source is covered under [Build](#build).
+
 ## Cache Location
 
 By default the tool reads the Hub cache resolved in this order:
@@ -103,6 +149,16 @@ Create Ollama import folders:
 bin/hf-to-local --target ~/LocalModels --runtime ollama
 ```
 
+Follow progress on a large cache:
+
+```bash
+bin/hf-to-local --target ~/LocalModels --verbose
+```
+
+`--verbose` prints a per-repo progress line to stderr, so it stays out of
+`--plan json` when that is piped. It applies to the create command; `list` does
+its work without writing anything and has no progress output.
+
 Create the Ollama models immediately after generating import folders:
 
 ```bash
@@ -161,6 +217,14 @@ bin/hf-to-local --target ~/LocalModels --revision 0123456789abcdef
 
 By default, the tool uses `refs/main` when available, otherwise the newest cached snapshot folder.
 
+With `--resolve-names`, `--repo` accepts either the id the cache folder encodes
+or the canonical one:
+
+```bash
+bin/hf-to-local list --repo camembert-base
+bin/hf-to-local list --repo almanach/camembert-base --resolve-names
+```
+
 Process every cached snapshot instead of a single one per repo:
 
 ```bash
@@ -210,6 +274,23 @@ bin/hf-to-local --target ~/LocalModels --on-conflict fail
 
 Every run reports linked files, generated files, skipped destinations, referenced bytes, and broken source symlinks. `list --json` and `--plan json` provide machine-readable data for scripts or GUI wrappers.
 
+A cache entry whose snapshot symlink no longer resolves to a blob — common after
+an interrupted download — is counted, reported on stderr, and skipped. It does
+not stop the run.
+
+Exit codes:
+
+```text
+0    success
+1    error
+2    usage error
+130  interrupted (SIGINT/SIGTERM)
+```
+
+On interrupt the tool stops at the next file boundary and still prints the
+summary for the work already done, so the state of the target directory is
+never a mystery.
+
 ## Release Builds
 
 Build local platform binary:
@@ -224,7 +305,10 @@ Build local release archives for supported platforms:
 make checksums
 ```
 
-This writes platform archives and `checksums.txt` under `dist/`.
+This writes platform archives and `checksums.txt` under `dist/`. The target
+list, archive naming, and archive formats match `.goreleaser.yml`, so this is a
+faithful rehearsal of a tagged release. It does not produce signatures or SBOMs,
+which are generated only by the release workflow.
 
 Tagged releases are handled by GoReleaser in GitHub Actions:
 
@@ -232,6 +316,10 @@ Tagged releases are handled by GoReleaser in GitHub Actions:
 git tag v0.2.0
 git push origin v0.2.0
 ```
+
+The release workflow additionally generates an SBOM per archive and signs
+`checksums.txt` with keyless cosign. `.goreleaser.yml` is validated by `goreleaser
+check` on every CI run, so a broken release config surfaces before tag time.
 
 Print the embedded version:
 
@@ -245,6 +333,6 @@ bin/hf-to-local --version
 - LM Studio primarily consumes GGUF model files in this workflow.
 - Ollama can import a GGUF file with `FROM /path/to/file.gguf` or safetensors weights with `FROM /path/to/safetensors/directory`.
 - `--llama-cpp-only` disables the Ollama safetensors fallback and keeps only compatible primary GGUF models plus companion `mmproj-*.gguf` and `mtp-*.gguf` files.
-- `--resolve-names` (available on both `list` and the create command) is the sole feature that reaches the network; every other operation is fully offline. It only queries the Hub for org-less cache folders, follows the API redirect to the canonical `org/name`, and caches the mapping under the user cache dir (`repo-names.json`). On the create command it also drives the `namespace/name` layout of the generated target folders.
+- `--resolve-names` (available on both `list` and the create command) is the sole feature that reaches the network; every other operation is fully offline. Lookups are retried once on a rate-limit or server error, the whole resolution pass is bounded by an overall time budget, and anything unresolved keeps its cached id and is retried on a later run. It only queries the Hub for org-less cache folders, follows the API redirect to the canonical `org/name`, and caches the mapping under the user cache dir (`repo-names.json`). On the create command it also drives the `namespace/name` layout of the generated target folders.
 - Hardlinks cannot cross filesystems. On Windows, symlink creation may require Developer Mode or elevated privileges.
 - The tool does not download models. Use Hugging Face tooling first, then run this tool against the populated cache.

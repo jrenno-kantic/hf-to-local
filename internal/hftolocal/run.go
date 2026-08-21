@@ -1,6 +1,7 @@
 package hftolocal
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -22,7 +23,10 @@ func DefaultHFCache() string {
 	return filepath.Join(home, ".cache", "huggingface", "hub")
 }
 
-func Run(opts Options) (Summary, error) {
+func Run(ctx context.Context, opts Options) (Summary, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if err := validateOptions(&opts); err != nil {
 		return Summary{}, err
 	}
@@ -38,27 +42,37 @@ func Run(opts Options) (Summary, error) {
 	opts.CacheDir = cacheDir
 	opts.TargetDir = targetDir
 
-	repos, err := discoverRepos(opts.CacheDir, opts.Repos)
+	repos, err := discoverRepos(opts.CacheDir)
 	if err != nil {
 		return Summary{}, err
 	}
-
 	if opts.ResolveNames {
-		resolveRepoNames(repos, defaultNameResolver, defaultNameCachePath(), resolveTimeout)
+		resolveRepoNames(ctx, repos, defaultNameResolver, defaultNameCachePath(), resolveTimeout, resolveBudget)
+	}
+	repos, err = filterRepos(repos, opts.Repos, opts.ResolveNames)
+	if err != nil {
+		return Summary{}, err
 	}
 
 	summary := Summary{ReposSeen: len(repos)}
 	var ollamaCreates []OllamaCreate
 	ggufClassifier := newGGUFClassifier()
 
-	for _, repo := range repos {
+	for index, repo := range repos {
+		if err := checkCanceled(ctx); err != nil {
+			return summary, err
+		}
 		snapshots, err := selectSnapshots(repo, opts.Revision, opts.AllSnapshots)
 		if err != nil {
 			return summary, err
 		}
 		summary.SnapshotsSeen += len(snapshots)
+		progress(opts, "[%d/%d] %s (%d snapshot(s))", index+1, len(repos), repo.RepoID, len(snapshots))
 
 		for _, snapshot := range snapshots {
+			if err := checkCanceled(ctx); err != nil {
+				return summary, err
+			}
 			if opts.LlamaCppOnly {
 				ok, err := snapshotHasCompatibleGGUF(snapshot, ggufClassifier)
 				if err != nil {
@@ -69,17 +83,17 @@ func Run(opts Options) (Summary, error) {
 				}
 			}
 			if opts.Runtime == RuntimeAll || opts.Runtime == RuntimeMirror {
-				if err := createMirror(snapshot, opts, &summary); err != nil {
+				if err := createMirror(ctx, snapshot, opts, &summary); err != nil {
 					return summary, err
 				}
 			}
 			if opts.Runtime == RuntimeAll || opts.Runtime == RuntimeLMStudio {
-				if err := createLMStudio(snapshot, opts, &summary, ggufClassifier); err != nil {
+				if err := createLMStudio(ctx, snapshot, opts, &summary, ggufClassifier); err != nil {
 					return summary, err
 				}
 			}
 			if opts.Runtime == RuntimeAll || opts.Runtime == RuntimeOllama {
-				creates, err := createOllama(snapshot, opts, &summary, ggufClassifier)
+				creates, err := createOllama(ctx, snapshot, opts, &summary, ggufClassifier)
 				if err != nil {
 					return summary, err
 				}
@@ -94,7 +108,11 @@ func Run(opts Options) (Summary, error) {
 		}
 		if opts.CreateOllama && !opts.DryRun {
 			for _, create := range ollamaCreates {
-				if err := runOllamaCreate(create); err != nil {
+				if err := checkCanceled(ctx); err != nil {
+					return summary, err
+				}
+				progress(opts, "ollama create %s", create.ModelName)
+				if err := runOllamaCreate(ctx, create); err != nil {
 					return summary, err
 				}
 				summary.OllamaCreatesRun++
@@ -138,6 +156,9 @@ func validateOptions(opts *Options) error {
 	}
 	if opts.Stdout == nil {
 		opts.Stdout = io.Discard
+	}
+	if opts.Stderr == nil {
+		opts.Stderr = io.Discard
 	}
 
 	switch opts.Runtime {

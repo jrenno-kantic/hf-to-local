@@ -9,15 +9,14 @@ import (
 	"strings"
 )
 
-func discoverRepos(cacheDir string, requested []string) ([]CachedRepo, error) {
+// discoverRepos returns every model repo in the cache, unfiltered. Selection is
+// a separate step (filterRepos) so --resolve-names can rewrite ids to their
+// canonical form in between: filtering first would compare a user-supplied
+// canonical id against the legacy org-less folder name and find nothing.
+func discoverRepos(cacheDir string) ([]CachedRepo, error) {
 	entries, err := os.ReadDir(cacheDir)
 	if err != nil {
 		return nil, fmt.Errorf("read HF cache directory %s: %w", cacheDir, err)
-	}
-
-	requestedSet := make(map[string]struct{}, len(requested))
-	for _, repo := range requested {
-		requestedSet[repo] = struct{}{}
 	}
 
 	var repos []CachedRepo
@@ -25,14 +24,8 @@ func discoverRepos(cacheDir string, requested []string) ([]CachedRepo, error) {
 		if !entry.IsDir() || !strings.HasPrefix(entry.Name(), "models--") {
 			continue
 		}
-		repoID := CacheNameToRepoID(entry.Name())
-		if len(requestedSet) > 0 {
-			if _, ok := requestedSet[repoID]; !ok {
-				continue
-			}
-		}
 		repos = append(repos, CachedRepo{
-			RepoID:   repoID,
+			RepoID:   CacheNameToRepoID(entry.Name()),
 			CacheDir: filepath.Join(cacheDir, entry.Name()),
 		})
 	}
@@ -40,23 +33,54 @@ func discoverRepos(cacheDir string, requested []string) ([]CachedRepo, error) {
 	sort.Slice(repos, func(i, j int) bool {
 		return repos[i].RepoID < repos[j].RepoID
 	})
+	return repos, nil
+}
 
-	found := make(map[string]struct{}, len(repos))
-	for _, repo := range repos {
-		found[repo.RepoID] = struct{}{}
+// filterRepos keeps the repos matching requested. A repo matches on its current
+// id or on the id its cache folder encodes, so --repo accepts either the legacy
+// org-less name or the canonical one once --resolve-names has run.
+func filterRepos(repos []CachedRepo, requested []string, resolveNames bool) ([]CachedRepo, error) {
+	if len(requested) == 0 {
+		return repos, nil
 	}
+
+	requestedSet := make(map[string]struct{}, len(requested))
+	for _, repo := range requested {
+		requestedSet[repo] = struct{}{}
+	}
+
+	var selected []CachedRepo
+	matched := make(map[string]struct{}, len(requested))
+	for _, repo := range repos {
+		cachedID := CacheNameToRepoID(filepath.Base(repo.CacheDir))
+		hit := false
+		for _, candidate := range []string{repo.RepoID, cachedID} {
+			if _, ok := requestedSet[candidate]; ok {
+				matched[candidate] = struct{}{}
+				hit = true
+			}
+		}
+		if hit {
+			selected = append(selected, repo)
+		}
+	}
+
 	var missing []string
 	for _, repo := range requested {
-		if _, ok := found[repo]; !ok {
+		if _, ok := matched[repo]; !ok {
 			missing = append(missing, repo)
 		}
 	}
 	if len(missing) > 0 {
 		sort.Strings(missing)
-		return nil, fmt.Errorf("requested repo(s) not found in cache: %s", strings.Join(missing, ", "))
+		message := fmt.Sprintf("requested repo(s) not found in cache: %s", strings.Join(missing, ", "))
+		if !resolveNames {
+			message += " (repos cached under a legacy org-less id match only with --resolve-names)"
+		}
+		return nil, errors.New(message)
 	}
 
-	return repos, nil
+	return selected, nil
 }
 
 func CacheNameToRepoID(name string) string {
