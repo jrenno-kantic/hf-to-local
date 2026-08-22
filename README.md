@@ -33,7 +33,7 @@ Download an archive for your platform from the
 extract and place the binary on your `PATH`:
 
 ```bash
-VERSION=0.2.0
+VERSION=0.3.0
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')   # darwin or linux
 ARCH=$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')
 
@@ -332,8 +332,8 @@ which are generated only by the release workflow.
 Tagged releases are handled by GoReleaser in GitHub Actions:
 
 ```bash
-git tag v0.2.0
-git push origin v0.2.0
+git tag v0.3.0
+git push origin v0.3.0
 ```
 
 The release workflow additionally generates an SBOM per archive and signs
