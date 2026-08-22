@@ -11,7 +11,8 @@ This is a Go CLI for linking Hugging Face cache snapshots into local model folde
 - `internal/hftolocal/regression_test.go`: guards for previously fixed bugs — broken sources, path containment, repo filtering, Ollama re-runs, cancellation.
 - `internal/hftolocal/resolve_test.go`, `resolve_http_test.go`: name resolution, with an injected resolver and `httptest` servers rather than live network calls.
 - `Makefile`: build, test, format, vet, dist, checksums, clean.
-- `.github/workflows/ci.yml`: test/vet/build across Linux, macOS, and Windows, plus `gofmt` and `goreleaser check` gates.
+- `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`, `.github/ISSUE_TEMPLATE/`: contributor-facing docs. `CONTRIBUTING.md` restates the invariants below for humans; keep the two in sync.
+- `.github/workflows/ci.yml`: test/vet/build across Linux, macOS, and Windows on the current toolchain, plus a build against the `go.mod` floor and `gofmt`/`goreleaser check` gates.
 - `.github/workflows/release.yml` and `.goreleaser.yml`: tagged releases, SBOMs, cosign signing, and the Homebrew cask published to `jrenno-kantic/homebrew-tap`.
 
 ## Build, Test, and Development Commands
@@ -28,7 +29,7 @@ This is a Go CLI for linking Hugging Face cache snapshots into local model folde
 
 ## Coding Style & Naming Conventions
 
-Use idiomatic Go and keep the project standard-library only unless a dependency clearly pays for itself. Format all Go files with `gofmt`. Public types and functions should use clear exported names, such as `Options`, `Summary`, and `Run`; private helpers should stay narrow and lower camel case. Keep CLI flag names stable and kebab-case, for example `--link-mode` and `--all-snapshots`. The create and `list` subcommands own separate `flag.FlagSet`s, so a flag that belongs to both must be registered twice — check for drift when adding one.
+Target Go 1.22 (the floor declared in `go.mod`, enforced by the `minimum-go` CI job); do not raise it without a concrete reason, since it gates who can install and contribute. Use idiomatic Go and keep the project standard-library only unless a dependency clearly pays for itself. Format all Go files with `gofmt`. Public types and functions should use clear exported names, such as `Options`, `Summary`, and `Run`; private helpers should stay narrow and lower camel case. Keep CLI flag names stable and kebab-case, for example `--link-mode` and `--all-snapshots`. The create and `list` subcommands own separate `flag.FlagSet`s, so a flag that belongs to both must be registered twice — check for drift when adding one.
 
 ## Invariants
 

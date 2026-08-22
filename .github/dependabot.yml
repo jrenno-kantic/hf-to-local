@@ -1,0 +1,20 @@
+version: 2
+updates:
+  # Actions are pinned to commit SHAs; Dependabot updates the SHA and the
+  # trailing version comment together, which is the only practical way to keep
+  # pinned actions current.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "ci"
+
+  # The project is standard-library only, so this exists to catch a dependency
+  # being added without anyone noticing, and to bump the Go directive.
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "deps"

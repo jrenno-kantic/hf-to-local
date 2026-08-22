@@ -1,3 +1,3 @@
 module github.com/jrenno-kantic/hf-to-local
 
-go 1.27
+go 1.22

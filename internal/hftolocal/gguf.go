@@ -48,6 +48,10 @@ func newGGUFClassifier() *ggufClassifier {
 	return &ggufClassifier{results: map[string]ggufClassification{}}
 }
 
+// llamaCppGenerationArchitectures is the allowlist behind --llama-cpp-only. The
+// identifiers mirror the text-generation architectures registered by llama.cpp
+// (MIT, https://github.com/ggml-org/llama.cpp); update this list when llama.cpp
+// gains support for a new one.
 var llamaCppGenerationArchitectures = map[string]struct{}{
 	"afmoe":            {},
 	"apertus":          {},

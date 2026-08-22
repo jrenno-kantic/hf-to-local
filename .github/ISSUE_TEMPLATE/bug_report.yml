@@ -1,0 +1,58 @@
+name: Bug report
+description: Something did not behave the way the README says it should
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please do not attach model files. A description of the cache layout is
+        far more useful than the contents.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you expected, and what you got instead.
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: Command
+      description: The exact invocation, with any paths redacted.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: plan
+    attributes:
+      label: Dry-run output
+      description: >
+        Output of the same command with `--dry-run` added, if it is safe to
+        share. This is usually the fastest route to a diagnosis.
+      render: shell
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Output of `hf-to-local --version`.
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options: [macOS, Linux, Windows]
+    validations:
+      required: true
+  - type: dropdown
+    id: link-mode
+    attributes:
+      label: Link mode
+      options: [symlink, hardlink, copy]
+  - type: textarea
+    id: cache
+    attributes:
+      label: Cache layout
+      description: >
+        Anything unusual about the cache — a custom `--cache` or `HF_HOME`, a
+        separate filesystem, a network mount, interrupted downloads.

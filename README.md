@@ -89,6 +89,9 @@ bin/hf-to-local --target ~/LocalModels --cache /data/hf/hub
 
 ## Build
 
+Requires Go 1.22 or newer. The project is standard-library only and has no
+dependencies to fetch.
+
 ```bash
 make build
 ```
@@ -342,6 +345,22 @@ Print the embedded version:
 ```bash
 bin/hf-to-local --version
 ```
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow and the
+behavioral guarantees a change needs to preserve. Security issues should be
+reported privately — see [SECURITY.md](SECURITY.md).
+
+## Acknowledgements
+
+The architecture allowlist behind `--llama-cpp-only` mirrors the
+text-generation architectures registered by
+[llama.cpp](https://github.com/ggml-org/llama.cpp) (MIT).
+
+## License
+
+MIT. See [LICENSE](LICENSE).
 
 ## Notes
 
