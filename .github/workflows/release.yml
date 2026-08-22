@@ -33,3 +33,8 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # PAT with contents:write on jrenno-kantic/homebrew-tap. Always
+          # defined so the .goreleaser.yml template can read it; when the secret
+          # is unset it resolves to "" and the tap push is skipped rather than
+          # failing the release.
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}

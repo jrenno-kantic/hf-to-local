@@ -12,7 +12,7 @@ This is a Go CLI for linking Hugging Face cache snapshots into local model folde
 - `internal/hftolocal/resolve_test.go`, `resolve_http_test.go`: name resolution, with an injected resolver and `httptest` servers rather than live network calls.
 - `Makefile`: build, test, format, vet, dist, checksums, clean.
 - `.github/workflows/ci.yml`: test/vet/build across Linux, macOS, and Windows, plus `gofmt` and `goreleaser check` gates.
-- `.github/workflows/release.yml` and `.goreleaser.yml`: tagged releases, SBOMs, and cosign signing.
+- `.github/workflows/release.yml` and `.goreleaser.yml`: tagged releases, SBOMs, cosign signing, and the Homebrew cask published to `jrenno-kantic/homebrew-tap`.
 
 ## Build, Test, and Development Commands
 

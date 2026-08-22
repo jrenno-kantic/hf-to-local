@@ -12,6 +12,22 @@ Hugging Face stores Hub downloads under `~/.cache/huggingface/hub` by default. M
 
 ## Install
 
+On macOS, install from the Homebrew tap:
+
+```bash
+brew install jrenno-kantic/tap/hf-to-local
+```
+
+Or tap first:
+
+```bash
+brew tap jrenno-kantic/tap
+brew install hf-to-local
+```
+
+Homebrew supports casks on macOS only; on Linux and Windows use the release
+archive below.
+
 Download an archive for your platform from the
 [releases page](https://github.com/jrenno-kantic/hf_to_local/releases), then
 extract and place the binary on your `PATH`:

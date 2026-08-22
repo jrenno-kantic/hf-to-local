@@ -61,27 +61,47 @@ signs:
     artifacts: checksum
     output: true
 
-# Homebrew tap. Left disabled because publishing needs two things that do not
-# exist yet; enabling it before then makes `git push --tags` fail the release:
+# Publishes Casks/hf-to-local.rb to github.com/jrenno-kantic/homebrew-tap on
+# each tagged release, so `brew install jrenno-kantic/tap/hf-to-local` works.
 #
-#   1. A tap repository named jrenno-kantic/homebrew-tap.
-#   2. A HOMEBREW_TAP_GITHUB_TOKEN secret with write access to it, exported in
-#      .github/workflows/release.yml (the default GITHUB_TOKEN cannot push to
-#      another repository).
+# This is a Cask, not a Formula: GoReleaser deprecated `brews` in v2.16 because
+# formulas that drop in a pre-built binary were always a workaround. The
+# generated cask carries Linux URLs too, but Homebrew only supports casks on
+# macOS, so Linux users should install from the release archive.
 #
-# Once both exist, uncomment this block and add the secret to the release job.
-#
-# brews:
-#   - name: hf-to-local
-#     repository:
-#       owner: jrenno-kantic
-#       name: homebrew-tap
-#       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
-#     homepage: "https://github.com/jrenno-kantic/hf_to_local"
-#     description: "Create local model folders that link into the Hugging Face Hub cache"
-#     license: "MIT"
-#     test: |
-#       system "#{bin}/hf-to-local", "--version"
+# Pushing to another repository needs a PAT with `contents: write` on the tap,
+# exported as the HOMEBREW_TAP_GITHUB_TOKEN secret; the default GITHUB_TOKEN is
+# scoped to this repository only. skip_upload degrades gracefully when that
+# secret is absent: the cask is still generated and the rest of the release
+# succeeds rather than failing on an auth error. With the token present it falls
+# back to "auto", which skips prereleases and snapshots.
+homebrew_casks:
+  - name: hf-to-local
+    binaries:
+      - hf-to-local
+    repository:
+      owner: jrenno-kantic
+      name: homebrew-tap
+      branch: main
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    skip_upload: '{{ if .Env.HOMEBREW_TAP_GITHUB_TOKEN }}auto{{ else }}true{{ end }}'
+    commit_author:
+      name: goreleaser[bot]
+      email: 1207947+goreleaser[bot]@users.noreply.github.com
+    commit_msg_template: "hf-to-local {{ .Version }}"
+    homepage: "https://github.com/jrenno-kantic/hf_to_local"
+    description: "Create local model folders that link into the Hugging Face Hub cache"
+    license: "MIT"
+    # Lets `brew audit` accept a homepage that differs from the download domain.
+    url:
+      verified: github.com/jrenno-kantic/hf_to_local
+    # The binary is unsigned, so Gatekeeper would quarantine it on first run.
+    hooks:
+      post:
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/hf-to-local"]
+          end
 
 snapshot:
   version_template: "{{ incpatch .Version }}-next"
