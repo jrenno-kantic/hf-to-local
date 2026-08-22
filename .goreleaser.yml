@@ -48,12 +48,24 @@ sboms:
 # Sign the checksum file rather than each archive: checksums.txt already covers
 # every artifact, so one signature verifies the whole release. Keyless signing
 # uses the workflow's OIDC identity, which is why release.yml needs id-token.
+#
+# --use-signing-config=false is required from cosign v3 on. v3 flipped that flag
+# to default true, which makes cosign fetch a TUF signing config and take a
+# branch that writes a Sigstore bundle to --bundle and returns before it ever
+# honors --output-signature. With no --bundle set that is an empty path, and
+# signing dies with "create bundle file: open : no such file or directory".
+# Opting out keeps the .sig/.pem pair the README's verify-blob recipe expects.
+#
+# The flags below are deprecated in favor of bundles, so a future cosign will
+# drop them. Migrating means emitting ${artifact}.bundle and rewriting the
+# "Verifying a download" section of README.md to match.
 signs:
   - cmd: cosign
     signature: "${artifact}.sig"
     certificate: "${artifact}.pem"
     args:
       - sign-blob
+      - "--use-signing-config=false"
       - "--output-signature=${signature}"
       - "--output-certificate=${certificate}"
       - "${artifact}"
